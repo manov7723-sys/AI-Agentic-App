@@ -47,8 +47,33 @@ module "eks" {
 
   enable_cluster_creator_admin_permissions = true
 
+  access_entries = {
+    entry0 = {
+      principal_arn = "arn:aws:iam::985465459771:user/agent-user1"
+      policy_associations = {
+        main = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+    entry1 = {
+      principal_arn = "arn:aws:iam::985465459771:root"
+      policy_associations = {
+        main = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
+
   eks_managed_node_groups = {
-    system = {
+    dev-workers = {
       subnet_ids     = local.node_subnet_ids
       instance_types = ["t3.medium"]
       capacity_type  = "ON_DEMAND"
@@ -56,19 +81,7 @@ module "eks" {
       max_size       = 3
       desired_size   = 2
       disk_size      = 100
-      labels = { role = "system" }
-      taints = {
-        CriticalAddonsOnly = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
-      }
-    }
-    application = {
-      subnet_ids     = local.node_subnet_ids
-      instance_types = ["t3.medium"]
-      capacity_type  = "ON_DEMAND"
-      min_size       = 2
-      max_size       = 20
-      desired_size   = 3
-      labels = { role = "application", env = "production" }
+      labels = { role = "dev-workers", env = "production" }
     }
   }
 
