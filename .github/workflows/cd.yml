@@ -41,7 +41,7 @@ jobs:
         uses: azure/setup-kubectl@v4
 
       - name: Configure cluster access (keyless)
-        run: aws eks update-kubeconfig --name "dev-cluster-1" --region us-east-1
+        run: aws eks update-kubeconfig --name "dev" --region us-east-1
 
       - name: Ensure namespace exists
         run: kubectl get namespace ai-agentic-app || kubectl create namespace ai-agentic-app
