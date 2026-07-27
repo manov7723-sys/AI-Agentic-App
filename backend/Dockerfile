@@ -6,13 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-# Ensure the production server ("uvicorn") is present even if it's
-# missing from requirements.txt — otherwise the CMD fails with
-# "uvicorn: not found" at container start.
+# Ensure the production ASGI server is present even if it's missing from
+# requirements.txt — otherwise the CMD fails with "uvicorn: not found".
 RUN pip install --no-cache-dir "uvicorn[standard]"
 COPY . .
 # Non-root runtime user.
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser /app
 USER appuser
 EXPOSE 8000
-CMD ["uvicorn","--host","0.0.0.0","--port","8000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
