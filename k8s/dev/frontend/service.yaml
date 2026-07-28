@@ -3,10 +3,6 @@ kind: Service
 metadata:
   name: ai-agentic-app-frontend
   namespace: ai-agentic-app
-  annotations:
-    "service.beta.kubernetes.io/aws-load-balancer-type": external
-    "service.beta.kubernetes.io/aws-load-balancer-scheme": internet-facing
-    "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": ip
   labels:
     app.kubernetes.io/name: ai-agentic-app-frontend
     app.kubernetes.io/managed-by: deepagent
