@@ -16,6 +16,7 @@ import { cookies } from "next/headers";
 import { randomBytes, createHash } from "node:crypto";
 import type { SessionStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { authCookieSecure } from "./cookie-security";
 
 /**
  * Cookie names are env-configurable so deployments can rename their auth
@@ -37,25 +38,10 @@ const PENDING_TTL_SEC = 60 * 10; // 10 min to enter TOTP
 const ACTIVE_TTL_SEC = Number(process.env.SESSION_TTL_DAYS ?? "7") * 24 * 60 * 60;
 const ACTIVE_NO_REMEMBER_TTL_SEC = 60 * 60 * 12; // 12 hours
 
-/**
- * Whether to set the `Secure` flag on session cookies. Precedence:
- *   1. SESSION_COOKIE_SECURE=false  → force OFF (needed when the deployment
- *      serves the app over HTTP — e.g. behind a Classic ELB on port 80 with
- *      no TLS terminator yet. Browsers DROP Secure cookies over HTTP, which
- *      manifests as "login works but the next request has no session" and
- *      "Sign in again to set up two-factor" loops).
- *   2. SESSION_COOKIE_SECURE=true   → force ON (behind an HTTPS proxy where
- *      NODE_ENV isn't reliably "production" for some reason).
- *   3. Fallback: on when NODE_ENV === "production" (Next.js default).
- * Set SESSION_COOKIE_SECURE=false in the k8s Secret for HTTP-behind-LB
- * clusters until you put ACM/ALB/Cloudflare TLS in front.
- */
-function sessionCookieSecure(): boolean {
-  const override = process.env.SESSION_COOKIE_SECURE?.toLowerCase();
-  if (override === "false" || override === "0") return false;
-  if (override === "true" || override === "1") return true;
-  return process.env.NODE_ENV === "production";
-}
+// Secure-flag policy lives in one place so the session store and the OAuth
+// routes can never drift apart again — see lib/auth/cookie-security.ts for
+// the incident this prevents.
+const sessionCookieSecure = authCookieSecure;
 
 function generateToken(): string {
   return randomBytes(32).toString("base64url");
