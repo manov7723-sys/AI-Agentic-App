@@ -1,0 +1,64 @@
+name: CD (deploy all services)
+
+# Runs automatically after the CI workflow ("CI (build all services)") completes successfully.
+# Also supports manual dispatch for redeploying without a fresh build.
+on:
+  workflow_run:
+    workflows: ["CI (build all services)"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            app: ai-agentic-app-backend
+            manifestDir: k8s/prod/backend
+          - service: frontend
+            app: ai-agentic-app-frontend
+            manifestDir: k8s/prod/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Decode KUBECONFIG_B64 into ~/.kube/config
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          mkdir -p "$HOME/.kube"
+          if [ -z "$KUBECONFIG_B64" ]; then
+            echo "::error::KUBECONFIG_B64 secret is empty. The agent can heal this — say 'repair the CD kubeconfig'."
+            exit 1
+          fi
+          echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
+
+      - name: Ensure namespace exists
+        run: kubectl get namespace a-i-agentic-app || kubectl create namespace a-i-agentic-app
+
+      - name: Apply ${{ matrix.service }} manifests
+        run: kubectl apply -n a-i-agentic-app -f ${{ matrix.manifestDir }}/
+
+      - name: Restart ${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
+        run: kubectl rollout restart deployment/${{ matrix.app }} -n a-i-agentic-app
+
+      - name: Wait for ${{ matrix.service }} rollout
+        run: kubectl rollout status deployment/${{ matrix.app }} -n a-i-agentic-app --timeout=180s
+
+      - name: Rollback ${{ matrix.service }} on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of ${{ matrix.app }} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/${{ matrix.app }} -n a-i-agentic-app
+          kubectl rollout status deployment/${{ matrix.app }} -n a-i-agentic-app --timeout=120s
