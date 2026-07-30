@@ -1,0 +1,121 @@
+name: CI (build all services)
+
+# Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
+# When this workflow succeeds, the CD workflow fires automatically via workflow_run.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            image: aiagenticappbackend.azurecr.io/ai-agentic-app-backend
+            context: backend
+            secretPrefix: ACR_AIAGENTICAPPBACKEND
+            loginServer: aiagenticappbackend.azurecr.io
+          - service: frontend
+            image: aiagenticappfrontend.azurecr.io/ai-agentic-app-frontend
+            context: frontend
+            secretPrefix: ACR_AIAGENTICAPPFRONTEND
+            loginServer: aiagenticappfrontend.azurecr.io
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Read the three ACR secrets for THIS matrix row by matrix.secretPrefix.
+      # We can't index secrets by variable, so we read every registry's set
+      # into env and pick at runtime. Each service block references only its
+      # own prefix; unused ones are silently unread.
+      - name: Read backend ACR secrets
+        if: matrix.service == 'backend'
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_ACR_AIAGENTICAPPBACKEND_LOGIN_SERVER }}
+          ACR_USERNAME: ${{ secrets.ACR_ACR_AIAGENTICAPPBACKEND_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_ACR_AIAGENTICAPPBACKEND_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ACR_ACR_AIAGENTICAPPBACKEND_LOGIN_SERVER"
+          [ -z "$ACR_USERNAME" ] && missing="$missing ACR_ACR_AIAGENTICAPPBACKEND_USERNAME"
+          [ -z "$ACR_PASSWORD" ] && missing="$missing ACR_ACR_AIAGENTICAPPBACKEND_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=${{ github.repository }} service=backend missing=$missing"
+            exit 1
+          fi
+          # Emit for the login step below.
+          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> "$GITHUB_ENV"
+          echo "ACR_USERNAME=$ACR_USERNAME" >> "$GITHUB_ENV"
+          echo "ACR_PASSWORD=$ACR_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Log in to ACR (backend)
+        if: matrix.service == 'backend'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_LOGIN_SERVER }}
+          username: ${{ env.ACR_USERNAME }}
+          password: ${{ env.ACR_PASSWORD }}
+      - name: Read frontend ACR secrets
+        if: matrix.service == 'frontend'
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_ACR_AIAGENTICAPPFRONTEND_LOGIN_SERVER }}
+          ACR_USERNAME: ${{ secrets.ACR_ACR_AIAGENTICAPPFRONTEND_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_ACR_AIAGENTICAPPFRONTEND_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ACR_ACR_AIAGENTICAPPFRONTEND_LOGIN_SERVER"
+          [ -z "$ACR_USERNAME" ] && missing="$missing ACR_ACR_AIAGENTICAPPFRONTEND_USERNAME"
+          [ -z "$ACR_PASSWORD" ] && missing="$missing ACR_ACR_AIAGENTICAPPFRONTEND_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=${{ github.repository }} service=frontend missing=$missing"
+            exit 1
+          fi
+          # Emit for the login step below.
+          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> "$GITHUB_ENV"
+          echo "ACR_USERNAME=$ACR_USERNAME" >> "$GITHUB_ENV"
+          echo "ACR_PASSWORD=$ACR_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Log in to ACR (frontend)
+        if: matrix.service == 'frontend'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_LOGIN_SERVER }}
+          username: ${{ env.ACR_USERNAME }}
+          password: ${{ env.ACR_PASSWORD }}
+
+      - name: Build and tag ${{ matrix.service }} image
+        env:
+          IMAGE: ${{ matrix.image }}
+          TAG: ${{ github.sha }}
+        run: |
+          if [ "${{ matrix.context }}" = "." ]; then
+            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          else
+            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "${{ matrix.context }}/Dockerfile" "${{ matrix.context }}"
+          fi
+
+      - name: Scan ${{ matrix.service }} image for vulnerabilities (Trivy)
+        continue-on-error: true
+        env:
+          IMAGE: ${{ matrix.image }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.65.0 image \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+            "$IMAGE:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+
+      - name: Push ${{ matrix.service }} image
+        env:
+          IMAGE: ${{ matrix.image }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
